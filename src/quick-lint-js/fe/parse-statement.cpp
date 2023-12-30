@@ -4542,7 +4542,8 @@ void Parser::parse_and_visit_import(
   bool possibly_typescript_import_alias = false;
   // For 'import fs from "node:fs";', declared_variable is 'fs'.
   std::optional<Token> declared_variable = std::nullopt;
-  auto declare_variable_if_needed = [&](Variable_Kind kind) {
+  Variable_Kind declared_variable_kind = Variable_Kind::_import;
+  auto declare_variable_if_needed = [&]() {
     if (declared_variable.has_value()) {
       switch (declared_variable->type) {
       // import var from "module";  // Invalid.
@@ -4558,7 +4559,7 @@ void Parser::parse_and_visit_import(
       case Token_Type::kw_await:
       case Token_Type::kw_yield:
       case Token_Type::kw_let:
-        if (kind == Variable_Kind::_import_alias) {
+        if (declared_variable_kind == Variable_Kind::_import_alias) {
           // NOTE[TypeScript-namespace-alias-name]: TypeScript namespace aliases
           // can be named 'await' because TypeScript namespace aliases do not
           // enforce strict mode.
@@ -4584,7 +4585,8 @@ void Parser::parse_and_visit_import(
         break;
       }
 
-      v.visit_variable_declaration(declared_variable->identifier_name(), kind,
+      v.visit_variable_declaration(declared_variable->identifier_name(),
+                                   declared_variable_kind,
                                    Variable_Declaration_Flags::none);
       declared_variable = std::nullopt;  // Prevent double declaration.
     }
@@ -4622,7 +4624,7 @@ void Parser::parse_and_visit_import(
     declared_variable = this->peek();
     this->skip();
     if (this->peek().type == Token_Type::comma) {
-      declare_variable_if_needed(Variable_Kind::_import);
+      declare_variable_if_needed();
       this->skip();
       switch (this->peek().type) {
         // import fs, {readFile} from "fs";
@@ -4714,9 +4716,8 @@ void Parser::parse_and_visit_import(
     case Token_Type::kw_type:
       this->lexer_.commit_transaction(std::move(transaction));
       report_type_only_import_in_javascript_if_needed();
-      v.visit_variable_declaration(this->peek().identifier_name(),
-                                   Variable_Kind::_import_type,
-                                   Variable_Declaration_Flags::none);
+      declared_variable = this->peek();
+      declared_variable_kind = Variable_Kind::_import_type;
       this->skip();
       if (this->peek().type == Token_Type::comma) {
         this->skip();
@@ -4745,6 +4746,8 @@ void Parser::parse_and_visit_import(
           QLJS_PARSER_UNIMPLEMENTED();
           break;
         }
+      } else {
+        possibly_typescript_import_alias = true;
       }
       break;
 
@@ -4778,12 +4781,12 @@ void Parser::parse_and_visit_import(
 
   switch (this->peek().type) {
   case Token_Type::kw_from:
-    declare_variable_if_needed(Variable_Kind::_import);
+    declare_variable_if_needed();
     this->skip();
     break;
 
   case Token_Type::string:
-    declare_variable_if_needed(Variable_Kind::_import);
+    declare_variable_if_needed();
     this->diag_reporter_->report(Diag_Expected_From_Before_Module_Specifier{
         .module_specifier = this->peek().span(),
     });
@@ -4811,9 +4814,16 @@ void Parser::parse_and_visit_import(
         if (this->peek().type == Token_Type::left_paren &&
             namespace_name.normalized_name() == u8"require"_sv) {
           // import fs = require("fs");
+          // import type fs = require("fs");
+
+          // NOTE[TypeScript-type-import-alias]: 'import fs = ' and
+          // 'import type fs = ...' both declare variables which conflict with
+          // 'let', 'class', etc. Overwrite Variable_Kind::_import_type.
+          //
           // FIXME(strager): Should this behave like an import or an import
           // alias or some other kind?
-          declare_variable_if_needed(Variable_Kind::_import);
+          declared_variable_kind = Variable_Kind::_import;
+          declare_variable_if_needed();
           if (declare_context.declare_namespace_declare_keyword.has_value() &&
               !declare_context.in_module) {
             this->diag_reporter_->report(
@@ -4832,7 +4842,8 @@ void Parser::parse_and_visit_import(
         } else {
           // import myns = ns;
           // import C = ns.C;
-          declare_variable_if_needed(Variable_Kind::_import_alias);
+          declared_variable_kind = Variable_Kind::_import_alias;
+          declare_variable_if_needed();
           v.visit_variable_namespace_use(namespace_name);
           while (this->peek().type == Token_Type::dot) {
             this->skip();
@@ -4855,7 +4866,7 @@ void Parser::parse_and_visit_import(
       }
 
       default:
-        declare_variable_if_needed(Variable_Kind::_import);
+        declare_variable_if_needed();
         QLJS_PARSER_UNIMPLEMENTED();
         break;
       }
@@ -4864,10 +4875,10 @@ void Parser::parse_and_visit_import(
       return;
     }
 
-    declare_variable_if_needed(Variable_Kind::_import);
+    declare_variable_if_needed();
     [[fallthrough]];
   default:
-    declare_variable_if_needed(Variable_Kind::_import);
+    declare_variable_if_needed();
     this->diag_reporter_->report(Diag_Expected_From_And_Module_Specifier{
         .where = Source_Code_Span::unit(this->lexer_.end_of_previous_token()),
     });
