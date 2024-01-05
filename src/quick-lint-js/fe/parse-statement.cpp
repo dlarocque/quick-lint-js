@@ -3964,6 +3964,12 @@ void Parser::parse_and_visit_for(Parse_Visitor_Base &v) {
   this->skip();
 
   if (this->peek().type == Token_Type::kw_await) {
+    Source_Code_Span await_token_span = this->peek().span();
+    if (!this->in_async_function_) {
+      this->diag_reporter_->report(Diag_Await_Operator_Outside_Async{
+          await_token_span
+      });
+    }
     this->skip();
   }
 

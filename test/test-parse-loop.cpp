@@ -893,7 +893,8 @@ TEST_F(Test_Parse_Loop, for_of_loop) {
 
   {
     Spy_Visitor p = test_parse_and_visit_statement(
-        u8"for await (let x of xs) { body; }"_sv, no_diags, javascript_options);
+        u8"for await (let x of xs) { body; }"_sv,     //
+        u8"    ^^^^^ Diag_Await_Operator_Outside_Async"_diag);
     EXPECT_THAT(p.visits, ElementsAreArray({
                               "visit_enter_for_scope",       //
                               "visit_variable_use",          //
